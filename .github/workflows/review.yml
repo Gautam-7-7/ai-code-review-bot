@@ -1,17 +1,14 @@
-name: Code Review Bot
+name: AI Code Review Bot
 
 on:
-  push:
-    branches:
-      - main
   pull_request:
+    types: [opened, synchronize]
 
 jobs:
-  build:
+  review:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v3
 
       - name: Set up Python
@@ -24,6 +21,12 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run tests
+      - name: Run AI Reviewer
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
-          pytest || echo "No tests yet"
+          python bot.py
+
