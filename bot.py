@@ -2,42 +2,55 @@ import os
 import requests
 from openai import OpenAI
 
-# Load environment variables
-GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-REPO = os.getenv("GITHUB_REPOSITORY")
-PR_NUMBER = os.getenv("PR_NUMBER")
+def main():
+    # Read secrets
+    github_token = os.getenv("GITHUB_TOKEN")
+    openai_key = os.getenv("OPENAI_API_KEY")
+    repo = os.getenv("GITHUB_REPOSITORY")       # owner/repo
+    pr_number = os.getenv("PR_NUMBER")          # set in workflow
 
-client = OpenAI(api_key=OPENAI_API_KEY)
+    if not github_token or not openai_key:
+        print("❌ Missing secrets")
+        return
 
-def get_pr_diff():
-    """Fetch PR diff from GitHub API"""
-    url = f"https://api.github.com/repos/{REPO}/pulls/{PR_NUMBER}"
-    headers = {"Authorization": f"token {GITHUB_TOKEN}"}
-    response = requests.get(url, headers=headers)
-    pr_data = response.json()
-    diff_url = pr_data["diff_url"]
-    return requests.get(diff_url, headers=headers).text
+    print(f"✅ Running review for PR #{pr_number} in {repo}")
 
-def review_code(diff):
-    """Send diff to GPT for review"""
-    prompt = f"Review the following GitHub Pull Request diff and suggest improvements:\n\n{diff}"
+    # Step 1: Get PR diff
+    diff_url = f"https://api.github.com/repos/{repo}/pulls/{pr_number}/files"
+    headers = {"Authorization": f"token {github_token}"}
+    resp = requests.get(diff_url, headers=headers)
+
+    if resp.status_code != 200:
+        print("❌ Failed to fetch PR files:", resp.text)
+        return
+
+    files = resp.json()
+    changes = "\n\n".join(
+        [f"File: {f['filename']}\nPatch:\n{f.get('patch', '')}" for f in files]
+    )
+
+    # Step 2: Ask GPT for a code review
+    client = OpenAI(api_key=openai_key)
     response = client.chat.completions.create(
         model="gpt-4o-mini",
         messages=[
-            {"role": "system", "content": "You are a senior software engineer reviewing code."},
-            {"role": "user", "content": prompt}
+            {"role": "system", "content": "You are a helpful code reviewer."},
+            {"role": "user", "content": f"Review this code diff:\n{changes}"}
         ]
     )
-    return response.choices[0].message.content
 
-def post_review(comment):
-    """Post review as a comment on PR"""
-    url = f"https://api.github.com/repos/{REPO}/issues/{PR_NUMBER}/comments"
-    headers = {"Authorization": f"token {GITHUB_TOKEN}"}
-    requests.post(url, json={"body": comment}, headers=headers)
+    review = response.choices[0].message.content
+    print("AI Review:", review)
+
+    # Step 3: Post comment back to PR
+    comment_url = f"https://api.github.com/repos/{repo}/issues/{pr_number}/comments"
+    data = {"body": f"🤖 AI Code Review:\n\n{review}"}
+    comment_resp = requests.post(comment_url, headers=headers, json=data)
+
+    if comment_resp.status_code == 201:
+        print("✅ Review posted to PR")
+    else:
+        print("❌ Failed to post review:", comment_resp.text)
 
 if __name__ == "__main__":
-    diff = get_pr_diff()
-    review = review_code(diff)
-    post_review(review)
+    main()
